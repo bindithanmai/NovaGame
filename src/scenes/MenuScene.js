@@ -89,20 +89,28 @@ export default class MenuScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5);
 
-    const entries = Leaderboard.load();
-    const top5 = entries.slice(0, 5);
-    if (top5.length === 0) {
-      this.add.text(W / 2, 335, 'No scores yet — play to be first!', {
-        fontFamily: 'monospace', fontSize: '13px', fill: '#aaaaaa',
-      }).setOrigin(0.5);
-    } else {
-      top5.forEach((entry, i) => {
-        this.add.text(W / 2, 335 + i * 20,
-          `${i + 1}. ${entry.name.padEnd(12)} ${String(entry.score).padStart(6)}  Lv${entry.level}`,
-          { fontFamily: 'monospace', fontSize: '13px', fill: '#ffffff', stroke: '#000', strokeThickness: 2 }
-        ).setOrigin(0.5);
-      });
-    }
+    // Load scores async — show placeholder while waiting
+    const loadingTxt = this.add.text(W / 2, 335, '⏳ Loading scores…', {
+      fontFamily: 'monospace', fontSize: '13px', fill: '#aaaaaa',
+    }).setOrigin(0.5);
+
+    Leaderboard.load().then(entries => {
+      if (!this.scene.isActive('MenuScene')) return; // scene changed while loading
+      loadingTxt.destroy();
+      const top5 = entries.slice(0, 5);
+      if (top5.length === 0) {
+        this.add.text(W / 2, 335, 'No scores yet — play to be first!', {
+          fontFamily: 'monospace', fontSize: '13px', fill: '#aaaaaa',
+        }).setOrigin(0.5);
+      } else {
+        top5.forEach((entry, i) => {
+          this.add.text(W / 2, 335 + i * 20,
+            `${i + 1}. ${entry.name.padEnd(12)} ${String(entry.score).padStart(6)}  Lv${entry.level}`,
+            { fontFamily: 'monospace', fontSize: '13px', fill: '#ffffff', stroke: '#000', strokeThickness: 2 }
+          ).setOrigin(0.5);
+        });
+      }
+    });
 
     // Mute toggle
     this._muteBtn = this._makeButton(W - 44, 14, GameState.muted ? '🔇' : '🔊', 0x334455, () => {

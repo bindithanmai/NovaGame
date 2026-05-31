@@ -5,7 +5,8 @@ export default class GameOverScene extends Phaser.Scene {
   constructor() { super({ key: 'GameOverScene' }); }
 
   init(data) {
-    this._isFinale = data && data.isFinale;
+    this._isFinale    = data && data.isFinale;
+    this._submitting  = false;
   }
 
   create() {
@@ -63,25 +64,24 @@ export default class GameOverScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '16px', fill: '#fff', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5);
 
-    const submit = () => {
+    const submit = async () => {
+      if (this._submitting) return;
+      this._submitting = true;
+
       const name = inputEl.value.trim() || 'Nova Fan';
-      Leaderboard.save({
+      submitTxt.setText('Saving…');
+
+      await Leaderboard.save({
         name,
         score: GameState.score,
         level: GameState.currentLevel,
         date: Date.now(),
       });
 
-      if (Leaderboard.isInMemoryOnly()) {
-        this.add.text(W / 2, 225, '⚠ Score saved in-memory only (private mode)', {
-          fontFamily: 'monospace', fontSize: '11px', fill: '#ffaa44',
-        }).setOrigin(0.5);
-      }
-
       inputDom.destroy();
       submitBtn.destroy();
       submitTxt.destroy();
-      this._showLeaderboard(W, H);
+      await this._showLeaderboard(W, H);
     };
 
     submitBtn.on('pointerdown', submit);
@@ -90,8 +90,13 @@ export default class GameOverScene extends Phaser.Scene {
     this.input.keyboard.once('keydown-ENTER', submit);
   }
 
-  _showLeaderboard(W, H) {
-    const entries = Leaderboard.load();
+  async _showLeaderboard(W, H) {
+    const loading = this.add.text(W / 2, 230, '⏳ Loading scores…', {
+      fontFamily: 'monospace', fontSize: '14px', fill: '#aaaaaa',
+    }).setOrigin(0.5);
+
+    const entries = await Leaderboard.load();
+    loading.destroy();
 
     this.add.text(W / 2, 230, '🏆 Leaderboard', {
       fontFamily: 'monospace', fontSize: '18px', fill: '#ffdd44',

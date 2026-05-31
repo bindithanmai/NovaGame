@@ -1,52 +1,64 @@
-const KEY = 'nova-catch-leaderboard-v1';
+import { db } from '../firebase.js';
+import {
+  collection, addDoc, getDocs, query, orderBy, limit,
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const COLLECTION  = 'nova-scores';
+const LOCAL_KEY   = 'nova-catch-leaderboard-v1';
 const MAX_ENTRIES = 10;
 
-let inMemoryEntries = null; // fallback when localStorage unavailable
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function load() {
+function _localLoad() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(LOCAL_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.entries)) {
-      console.warn('[Leaderboard] Schema mismatch — resetting leaderboard');
-      return [];
-    }
+    if (!parsed || !Array.isArray(parsed.entries)) return [];
     return parsed.entries;
+  } catch { return []; }
+}
+
+function _localSave(entries) {
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify({ version: 1, entries }));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+// ── Public API (async) ────────────────────────────────────────────────────────
+
+async function load() {
+  try {
+    const q   = query(collection(db, COLLECTION), orderBy('score', 'desc'), limit(MAX_ENTRIES));
+    const snap = await getDocs(q);
+    const entries = snap.docs.map(d => d.data());
+    _localSave(entries);   // keep local copy as offline cache
+    return entries;
   } catch (err) {
-    console.warn('[Leaderboard] Failed to load:', err.message);
-    return inMemoryEntries || [];
+    console.warn('[Leaderboard] Firebase read failed, using local cache:', err.message);
+    return _localLoad();
   }
 }
 
-function save(entry) {
-  const entries = load();
-  entries.push({
-    name: String(entry.name || 'Nova Fan').slice(0, 12),
-    score: Number(entry.score) || 0,
-    level: Number(entry.level) || 1,
-    date: entry.date || Date.now(),
-  });
-  entries.sort((a, b) => b.score - a.score);
-  const capped = entries.slice(0, MAX_ENTRIES);
+async function save(entry) {
+  const clean = {
+    name:  String(entry.name  || 'Nova Fan').slice(0, 12),
+    score: Number(entry.score || 0),
+    level: Number(entry.level || 1),
+    date:  entry.date || Date.now(),
+  };
 
   try {
-    localStorage.setItem(KEY, JSON.stringify({ version: 1, entries: capped }));
-    inMemoryEntries = null;
+    await addDoc(collection(db, COLLECTION), clean);
   } catch (err) {
-    if (err.name === 'QuotaExceededError' || err.code === 22) {
-      console.warn('[Leaderboard] Storage quota exceeded — using in-memory fallback');
-      inMemoryEntries = capped;
-    } else {
-      console.warn('[Leaderboard] Failed to save:', err.message);
-      inMemoryEntries = capped;
-    }
+    // Firebase unavailable — fall back to localStorage only
+    console.warn('[Leaderboard] Firebase write failed, saving locally:', err.message);
+    const entries = _localLoad();
+    entries.push(clean);
+    entries.sort((a, b) => b.score - a.score);
+    _localSave(entries.slice(0, MAX_ENTRIES));
   }
 }
 
-function isInMemoryOnly() {
-  return inMemoryEntries !== null;
-}
-
-const Leaderboard = { load, save, isInMemoryOnly };
+const Leaderboard = { load, save };
 export default Leaderboard;
