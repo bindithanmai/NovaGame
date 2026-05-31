@@ -28,12 +28,12 @@ export default class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Nova sleeping — plays the actual sleep animation frames from row 8
-    const novaSpr = this.add.sprite(W / 2, 190, 'nova')
+    const novaSpr = this.add.sprite(W / 2, 170, 'nova')
       .setOrigin(0.5, 0.5)
       .setScale(2.5);
 
     // Check the animation key itself, not the texture key
-    const menuAnim = ['nova-sit', 'nova-sleep', 'nova-idle'].find(k => this.anims.exists(k));
+    const menuAnim = ['nova-sleep','nova-sit','nova-idle'].find(k => this.anims.exists(k));
     if (menuAnim) {
       novaSpr.play(menuAnim);
     }
