@@ -25,6 +25,54 @@ canvas {
   display: block;
 }
 
+/* ── Portrait rotation prompt ───────────────────────────────────────────── */
+#rotate-prompt {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #0d0d1a;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+#rotate-content {
+  text-align: center;
+  color: #ffffff;
+}
+
+#rotate-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  animation: wiggle 1.5s ease-in-out infinite;
+}
+
+#rotate-sub {
+  font-size: 14px;
+  color: #aaaaaa;
+  margin-top: 6px;
+  font-family: monospace;
+}
+
+#rotate-content p:first-of-type {
+  font-size: 22px;
+  font-family: Georgia, serif;
+  color: #ffcc44;
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25%       { transform: rotate(15deg); }
+  75%       { transform: rotate(-15deg); }
+}
+
+/* Show prompt and hide game in portrait mode */
+@media (orientation: portrait) {
+  #rotate-prompt { display: flex; }
+  #game          { display: none; }
+}
+
 /* DOM overlay for name input in GameOverScene */
 input[type="text"] {
   -webkit-user-select: text;
