@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Nova — Asset Exporter</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #12121f;
+      color: #ddd;
+      font-family: 'Courier New', monospace;
+      padding: 24px;
+    }
+    h1 { color: #ffcc44; font-size: 22px; margin-bottom: 4px; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 20px; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
+    .btn {
+      padding: 10px 22px; border: none; border-radius: 6px;
+      cursor: pointer; font-family: inherit; font-size: 13px; font-weight: bold;
+    }
+    .btn-primary { background: #4a90d9; color: #fff; }
+    .btn-primary:hover { background: #5ba3ec; }
+    .btn-primary:disabled { background: #334; color: #666; cursor: default; }
+    .btn-zip { background: #2ecc71; color: #111; }
+    .btn-zip:hover { background: #3de082; }
+    .section-title {
+      color: #88aaff; font-size: 13px; font-weight: bold;
+      margin: 28px 0 10px;
+      border-bottom: 1px solid #2a2a4a;
+      padding-bottom: 6px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: #1e1e38;
+      border: 1px solid #2a2a50;
+      border-radius: 8px;
+      padding: 14px 12px 12px;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .card:hover { border-color: #4a4a80; }
+    .preview-wrap {
+      background: repeating-conic-gradient(#2a2a4a 0% 25%, #1e1e38 0% 50%) 0 0 / 12px 12px;
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      padding: 8px;
+      min-height: 80px; width: 100%;
+    }
+    .preview-wrap canvas {
+      image-rendering: pixelated;
+      display: block;
+    }
+    .key-label {
+      font-size: 12px; color: #ccc; font-weight: bold; text-align: center;
+    }
+    .dim-label {
+      font-size: 10px; color: #556; text-align: center; word-break: break-all;
+    }
+    .path-label {
+      font-size: 9px; color: #557799; text-align: center; word-break: break-all;
+      background: #12121f; padding: 3px 6px; border-radius: 3px; width: 100%;
+    }
+    .save-btn {
+      background: #2a5a2a; color: #aaffaa; border: 1px solid #3a7a3a;
+      border-radius: 4px; padding: 5px 14px; cursor: pointer;
+      font-family: inherit; font-size: 11px; width: 100%;
+    }
+    .save-btn:hover { background: #336633; }
+    #status {
+      position: fixed; bottom: 20px; right: 20px;
+      background: #1e1e38; border: 1px solid #4a4a80;
+      border-radius: 8px; padding: 10px 16px;
+      font-size: 12px; color: #adf; display: none;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🐕 Nova — Asset Exporter</h1>
+<p class="subtitle">All assets rendered from game code at correct dimensions. Download individually or as a zip. Replace files at the paths shown to swap art.</p>
+
+<div class="toolbar">
+  <button class="btn btn-primary" id="dlAll">⬇ Download All (individual files)</button>
+  <button class="btn btn-zip" id="dlZip">📦 Download as ZIP</button>
+</div>
+
+<div id="sections"></div>
+<div id="status"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Phaser Graphics API → HTML Canvas 2D shim
+   Every method mirrors Phaser's Graphics object signature exactly.
+═══════════════════════════════════════════════════════════════════════════ */
+class G {
+  constructor(canvas) {
+    this.ctx = canvas.getContext('2d');
+  }
+  _hex(n) {
+    return '#' + (n >>> 0).toString(16).padStart(6, '0');
+  }
+  fillStyle(hex) {
+    this.ctx.fillStyle = this._hex(hex);
+  }
+  fillRect(x, y, w, h) {
+    this.ctx.fillRect(x, y, w, h);
+  }
+  fillCircle(cx, cy, r) {
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, Math.abs(r), 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+  fillEllipse(cx, cy, w, h) {
+    this.ctx.beginPath();
+    this.ctx.ellipse(cx, cy, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+  fillTriangle(x1, y1, x2, y2, x3, y3) {
+    this.ctx.beginPath();
+    this.ctx.moveTo(x1, y1);
+    this.ctx.lineTo(x2, y2);
+    this.ctx.lineTo(x3, y3);
+    this.ctx.closePath();
+    this.ctx.fill();
+  }
+  fillRoundedRect(x, y, w, h, r) {
+    const mr = Math.min(Math.abs(r), Math.abs(w) / 2, Math.abs(h) / 2);
+    this.ctx.beginPath();
+    if (this.ctx.roundRect) {
+      this.ctx.roundRect(x, y, w, h, mr);
+    } else {
+      this.ctx.moveTo(x + mr, y);
+      this.ctx.lineTo(x + w - mr, y);
+      this.ctx.arcTo(x + w, y, x + w, y + mr, mr);
+      this.ctx.lineTo(x + w, y + h - mr);
+      this.ctx.arcTo(x + w, y + h, x + w - mr, y + h, mr);
+      this.ctx.lineTo(x + mr, y + h);
+      this.ctx.arcTo(x, y + h, x, y + h - mr, mr);
+      this.ctx.lineTo(x, y + mr);
+      this.ctx.arcTo(x, y, x + mr, y, mr);
+    }
+    this.ctx.closePath();
+    this.ctx.fill();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Draw functions — faithfully ported from BootScene.js
+═══════════════════════════════════════════════════════════════════════════ */
+
+function drawNova(canvas) {
+  const W = canvas.width, H = canvas.height;
+  const g = new G(canvas);
+  const w = W, h = H;
+
+  const body   = 0xd4952a;  // rich golden coat
+  const bodyLt = 0xf0bf55;  // lighter golden — feather tips & highlights
+  const bodyDk = 0x9b6810;  // deeper golden — ear depth & shadows
+  const cream  = 0xf5e8b0;  // cream — muzzle, chest & inner-ear feathering
+  const black  = 0x1a1008;
+
+  // Feathery tail
+  g.fillStyle(bodyDk);
+  g.fillEllipse(w * 0.87, h * 0.50, w * 0.26, h * 0.14);
+  g.fillStyle(body);
+  g.fillEllipse(w * 0.85, h * 0.45, w * 0.30, h * 0.14);
+  g.fillStyle(bodyLt);
+  g.fillEllipse(w * 0.82, h * 0.40, w * 0.26, h * 0.12);
+  g.fillStyle(cream);
+  g.fillEllipse(w * 0.88, h * 0.35, w * 0.14, h * 0.08);
+
+  // Torso
+  g.fillStyle(body);
+  g.fillEllipse(w * 0.46, h * 0.64, w * 0.64, h * 0.42);
+
+  // Chest feathering
+  g.fillStyle(cream);
+  g.fillEllipse(w * 0.25, h * 0.68, w * 0.18, h * 0.28);
+  g.fillStyle(bodyLt);
+  g.fillEllipse(w * 0.26, h * 0.64, w * 0.12, h * 0.18);
+
+  // Legs
+  g.fillStyle(body);
+  [0.17, 0.34, 0.53, 0.70].forEach(lx => {
+    g.fillRoundedRect(w * lx, h * 0.78, w * 0.13, h * 0.21, 4);
+  });
+  // Back-leg feathering
+  g.fillStyle(bodyLt);
+  [0.53, 0.70].forEach(lx => {
+    g.fillEllipse(w * (lx + 0.09), h * 0.84, w * 0.07, h * 0.16);
+  });
+  // Paws
+  g.fillStyle(bodyDk);
+  [0.17, 0.34, 0.53, 0.70].forEach(lx => {
+    g.fillRoundedRect(w * lx, h * 0.91, w * 0.13, h * 0.08, 4);
+  });
+
+  // Collar
+  g.fillStyle(0xbb2222);
+  g.fillRect(w * 0.28, h * 0.37, w * 0.30, h * 0.05);
+  g.fillStyle(0xffdd44);
+  g.fillCircle(w * 0.44, h * 0.415, h * 0.020);
+
+  // Neck
+  g.fillStyle(body);
+  g.fillEllipse(w * 0.42, h * 0.40, w * 0.22, h * 0.22);
+
+  // Head
+  g.fillStyle(body);
+  g.fillEllipse(w * 0.44, h * 0.22, w * 0.46, h * 0.36);
+
+  // Long feathery drop ears
+  g.fillStyle(bodyDk);
+  g.fillEllipse(w * 0.23, h * 0.29, w * 0.15, h * 0.30);
+  g.fillEllipse(w * 0.65, h * 0.29, w * 0.15, h * 0.30);
+  g.fillStyle(bodyLt);
+  g.fillEllipse(w * 0.23, h * 0.30, w * 0.08, h * 0.20);
+  g.fillEllipse(w * 0.65, h * 0.30, w * 0.08, h * 0.20);
+
+  // Cream muzzle
+  g.fillStyle(cream);
+  g.fillEllipse(w * 0.44, h * 0.29, w * 0.26, h * 0.16);
+
+  // Black nose
+  g.fillStyle(black);
+  g.fillEllipse(w * 0.44, h * 0.23, w * 0.10, h * 0.06);
+
+  // Warm expressive dark-brown eyes
+  g.fillStyle(0x3a2208);
+  g.fillCircle(w * 0.36, h * 0.18, h * 0.033);
+  g.fillCircle(w * 0.52, h * 0.18, h * 0.033);
+  g.fillStyle(0xffffff);
+  g.fillCircle(w * 0.352, h * 0.172, h * 0.012);
+  g.fillCircle(w * 0.513, h * 0.172, h * 0.012);
+}
+
+function drawIdli(canvas) {
+  const W = canvas.width, H = canvas.height;
+  const g = new G(canvas);
+  const w = W, h = H;
+
+  g.fillStyle(0xc4b8a4);
+  g.fillEllipse(w * 0.50, h * 0.74, w * 0.86, h * 0.20);
+  g.fillStyle(0xf2ece2);
+  g.fillEllipse(w * 0.50, h * 0.60, w * 0.84, h * 0.44);
+  g.fillStyle(0xf8f4ee);
+  g.fillEllipse(w * 0.50, h * 0.54, w * 0.76, h * 0.30);
+  g.fillStyle(0xfdfcf8);
+  g.fillEllipse(w * 0.40, h * 0.48, w * 0.32, h * 0.14);
+  g.fillStyle(0xddd5c8);
+  [[0.36,0.54],[0.52,0.50],[0.64,0.56],[0.44,0.62],
+   [0.58,0.64],[0.48,0.44],[0.68,0.48],[0.38,0.46]]
+    .forEach(([px, py]) => g.fillCircle(w * px, h * py, 2.2));
+}
+
+function drawParticle(canvas) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(4, 4, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawEmoji(canvas, emoji) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const size = Math.floor(Math.min(w, h) * 0.4);
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = `${size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, w / 2, h / 2);
+}
+
+function drawBackground(canvas, key) {
+  const W = canvas.width, H = canvas.height;
+  const g = new G(canvas);
+  const w = W, h = H;
+
+  const sky = {
+    'bg-1': 0x87ceeb, 'bg-2': 0x5599ff, 'bg-3': 0x4a7788,
+    'bg-4': 0x445566, 'bg-5': 0x88bb55, 'bg-6': 0x0d1a2e,
+    'bg-7': 0x99bbdd, 'bg-8': 0x225533, 'bg-9': 0x0a3550,
+    'bg-10': 0x020008,
+  };
+  g.fillStyle(sky[key] || 0x1a1a2e);
+  g.fillRect(0, 0, w, h);
+
+  if (key === 'bg-1') {
+    g.fillStyle(0xffdd44); g.fillCircle(w*.84, h*.13, 30);
+    g.fillStyle(0xfff5b0); g.fillCircle(w*.84, h*.13, 22);
+    g.fillStyle(0xffffff);
+    [[.15,.11,100,32],[.40,.07,120,28],[.62,.14,90,26]].forEach(([cx,cy,cw,ch]) => {
+      g.fillEllipse(w*cx, h*cy, cw, ch);
+      g.fillEllipse(w*cx - cw*.2, h*cy+5, cw*.65, ch*.8);
+      g.fillEllipse(w*cx + cw*.2, h*cy+4, cw*.7,  ch*.8);
+    });
+  }
+  if (key === 'bg-2') {
+    g.fillStyle(0xffcc22); g.fillCircle(w*.80, h*.11, 28);
+    g.fillStyle(0xfff5aa); g.fillCircle(w*.80, h*.11, 20);
+    g.fillStyle(0x88aaff); g.fillEllipse(w*.5, h*.72, w*1.2, h*.3);
+  }
+  if (key === 'bg-3') {
+    g.fillStyle(0x1a4422);
+    [.05,.14,.24,.35,.47,.58,.68,.78,.88,.96].forEach(tx => {
+      const th = 80 + (tx*170)%60;
+      g.fillTriangle(w*tx, h*.55, w*tx-28, h*.72, w*tx+28, h*.72);
+      g.fillTriangle(w*tx, h*.55-th*.4, w*tx-22, h*.55, w*tx+22, h*.55);
+    });
+  }
+  if (key === 'bg-4') {
+    g.fillStyle(0x556677);
+    [[.2,.1,180,50],[.55,.06,220,55],[.85,.12,160,45]].forEach(([cx,cy,cw,ch]) =>
+      g.fillEllipse(w*cx, h*cy, cw, ch));
+    g.fillStyle(0x7799bb);
+    for (let i=0;i<55;i++) g.fillRect((i*31+7)%w, (i*47+3)%Math.floor(h*.80), 1, 18);
+  }
+  if (key === 'bg-5') {
+    g.fillStyle(0xffffff);
+    [[.20,.09,90,26],[.60,.06,110,24]].forEach(([cx,cy,cw,ch]) =>
+      g.fillEllipse(w*cx, h*cy, cw, ch));
+    g.fillStyle(0xbb3311); g.fillRect(w*.74, h*.50, 55, 38);
+    g.fillStyle(0x992211); g.fillTriangle(w*.735, h*.50, w*.815, h*.36, w*.895, h*.50);
+  }
+  if (key === 'bg-6') {
+    g.fillStyle(0x1a2a44);
+    [[.04,.28,44,130],[.13,.18,58,150],[.26,.25,48,120],
+     [.42,.15,54,155],[.58,.22,50,130],[.72,.30,42,110],
+     [.83,.20,52,145],[.93,.32,38,100]].forEach(([bx,by,bw,bh]) =>
+      g.fillRect(w*bx, h*by, bw, bh));
+    g.fillStyle(0xffee88);
+    for (let i=0;i<40;i++) g.fillRect((i*53+8)%(w-10), h*.18+((i*23)%Math.floor(h*.55)), 5, 4);
+    g.fillStyle(0x4466aa); g.fillCircle(w*.5, h*.06, 18);
+    g.fillStyle(0x0d1a2e); g.fillCircle(w*.52, h*.055, 14);
+  }
+  if (key === 'bg-7') {
+    g.fillStyle(0xddeeff); g.fillTriangle(w*.50,h*.08, w*.22,h*.55, w*.78,h*.55);
+    g.fillStyle(0xaabbdd); g.fillTriangle(w*.30,h*.18, w*.10,h*.55, w*.50,h*.55);
+    g.fillStyle(0xffffff); g.fillTriangle(w*.50,h*.08, w*.39,h*.27, w*.61,h*.27);
+    for (let i=0;i<40;i++) g.fillCircle((i*37+11)%w, (i*53+7)%Math.floor(h*.72), i%3===0?3:2);
+  }
+  if (key === 'bg-8') {
+    g.fillStyle(0x113300);
+    for (let i=0;i<12;i++) g.fillEllipse((i*73+5)%w, h*.40, 90, 120);
+    g.fillStyle(0x1a4400);
+    for (let i=0;i<10;i++) g.fillEllipse((i*89+30)%w, h*.32, 70, 90);
+  }
+  if (key === 'bg-9') {
+    g.fillStyle(0x1a6688);
+    [.15,.38,.60,.82].forEach(rx =>
+      g.fillTriangle(w*rx, 0, w*rx-20, h*.65, w*rx+20, h*.65));
+    g.fillStyle(0x3399cc);
+    for (let i=0;i<28;i++) g.fillCircle((i*53+7)%w, (i*37+3)%Math.floor(h*.75), 2+i%4);
+  }
+  if (key === 'bg-10') {
+    g.fillStyle(0xffffff);
+    for (let i=0;i<110;i++) g.fillCircle((i*97+13)%w, (i*71+23)%h, i%7===0?2:1);
+    g.fillStyle(0x1a0033); g.fillEllipse(w*.20, h*.25, 170, 75);
+    g.fillStyle(0x003322); g.fillEllipse(w*.72, h*.15, 130, 60);
+    g.fillStyle(0x886644); g.fillCircle(w*.87, h*.50, 26);
+    g.fillStyle(0xaa8855); g.fillCircle(w*.87, h*.50, 19);
+    g.fillStyle(0x664422); g.fillEllipse(w*.87, h*.50, 60, 8);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Asset manifest
+═══════════════════════════════════════════════════════════════════════════ */
+const ALL_ASSETS = [
+  // Character
+  { key:'nova',            file:'assets/nova/nova-sheet.png',         w:64,  h:96,  draw: drawNova },
+  // Catchable items (emoji)
+  { key:'item-ball',       file:'assets/items/ball.png',              w:36,  h:36,  emoji:'🎾' },
+  { key:'item-duck',       file:'assets/items/duck.png',              w:44,  h:36,  emoji:'🦆' },
+  { key:'item-frisbee',    file:'assets/items/frisbee.png',           w:48,  h:16,  emoji:'🥏' },
+  { key:'item-butterfly',  file:'assets/items/butterfly.png',         w:40,  h:32,  emoji:'🦋' },
+  { key:'item-starfish',   file:'assets/items/starfish.png',          w:36,  h:36,  emoji:'⭐' },
+  { key:'item-pinecone',   file:'assets/items/pinecone.png',          w:28,  h:36,  emoji:'🌲' },
+  { key:'item-umbrella',   file:'assets/items/umbrella.png',          w:48,  h:40,  emoji:'🌂' },
+  { key:'item-egg',        file:'assets/items/egg.png',               w:28,  h:36,  emoji:'🥚' },
+  { key:'item-newspaper',  file:'assets/items/newspaper.png',         w:44,  h:36,  emoji:'📰' },
+  { key:'item-snowball',   file:'assets/items/snowball.png',          w:36,  h:36,  emoji:'❄️' },
+  { key:'item-coconut',    file:'assets/items/coconut.png',           w:32,  h:36,  emoji:'🥥' },
+  { key:'item-fish',       file:'assets/items/fish.png',              w:44,  h:28,  emoji:'🐟' },
+  { key:'item-orb',        file:'assets/items/orb.png',               w:36,  h:36,  emoji:'🔮' },
+  // UI
+  { key:'biscuit',         file:'assets/biscuit.png',                 w:80,  h:80,  emoji:'🦴' },
+  { key:'idli',            file:'assets/idli.png',                    w:100, h:80,  draw: drawIdli },
+  { key:'heart',           file:'assets/heart.png',                   w:28,  h:28,  emoji:'❤️' },
+  { key:'particle',        file:'assets/particle.png',                w:8,   h:8,   draw: drawParticle },
+  // Backgrounds
+  { key:'bg-1',  file:'assets/backgrounds/level1.png',  w:800, h:450, label:'Level 1 · Sunny Park',    draw:(c)=>drawBackground(c,'bg-1')  },
+  { key:'bg-2',  file:'assets/backgrounds/level2.png',  w:800, h:450, label:'Level 2 · Beach',         draw:(c)=>drawBackground(c,'bg-2')  },
+  { key:'bg-3',  file:'assets/backgrounds/level3.png',  w:800, h:450, label:'Level 3 · Forest',        draw:(c)=>drawBackground(c,'bg-3')  },
+  { key:'bg-4',  file:'assets/backgrounds/level4.png',  w:800, h:450, label:'Level 4 · Rain',          draw:(c)=>drawBackground(c,'bg-4')  },
+  { key:'bg-5',  file:'assets/backgrounds/level5.png',  w:800, h:450, label:'Level 5 · Farm',          draw:(c)=>drawBackground(c,'bg-5')  },
+  { key:'bg-6',  file:'assets/backgrounds/level6.png',  w:800, h:450, label:'Level 6 · City Night',    draw:(c)=>drawBackground(c,'bg-6')  },
+  { key:'bg-7',  file:'assets/backgrounds/level7.png',  w:800, h:450, label:'Level 7 · Snow',          draw:(c)=>drawBackground(c,'bg-7')  },
+  { key:'bg-8',  file:'assets/backgrounds/level8.png',  w:800, h:450, label:'Level 8 · Jungle',        draw:(c)=>drawBackground(c,'bg-8')  },
+  { key:'bg-9',  file:'assets/backgrounds/level9.png',  w:800, h:450, label:'Level 9 · Underwater',    draw:(c)=>drawBackground(c,'bg-9')  },
+  { key:'bg-10', file:'assets/backgrounds/level10.png', w:800, h:450, label:'Level 10 · Space',        draw:(c)=>drawBackground(c,'bg-10') },
+];
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Render engine
+═══════════════════════════════════════════════════════════════════════════ */
+const rendered = {};   // key → full-res canvas
+
+function renderAll() {
+  ALL_ASSETS.forEach(asset => {
+    const canvas = document.createElement('canvas');
+    canvas.width  = asset.w;
+    canvas.height = asset.h;
+    if (asset.draw)  asset.draw(canvas);
+    if (asset.emoji) drawEmoji(canvas, asset.emoji);
+    rendered[asset.key] = canvas;
+  });
+}
+
+function downloadCanvas(canvas, filename) {
+  const a = document.createElement('a');
+  a.download = filename.split('/').pop();
+  a.href = canvas.toDataURL('image/png');
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function showStatus(msg) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function hideStatus() {
+  document.getElementById('status').style.display = 'none';
+}
+
+async function downloadAll() {
+  const btn = document.getElementById('dlAll');
+  btn.disabled = true;
+  for (let i = 0; i < ALL_ASSETS.length; i++) {
+    const a = ALL_ASSETS[i];
+    showStatus(`Downloading ${i + 1}/${ALL_ASSETS.length}: ${a.key}`);
+    downloadCanvas(rendered[a.key], a.file);
+    await new Promise(r => setTimeout(r, 350));
+  }
+  btn.disabled = false;
+  showStatus('✅ All done! Files are in your Downloads folder.');
+  setTimeout(hideStatus, 4000);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ZIP export (no dependencies — pure JS implementation)
+═══════════════════════════════════════════════════════════════════════════ */
+async function downloadZip() {
+  const btn = document.getElementById('dlZip');
+  btn.disabled = true;
+  btn.textContent = '⏳ Building ZIP…';
+
+  // Collect all PNG blobs
+  const files = [];
+  for (const asset of ALL_ASSETS) {
+    showStatus(`Preparing ${asset.key}…`);
+    const dataURL = rendered[asset.key].toDataURL('image/png');
+    const base64  = dataURL.split(',')[1];
+    const binary  = atob(base64);
+    const bytes   = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    files.push({ path: asset.file, data: bytes });
+    await new Promise(r => setTimeout(r, 10));
+  }
+
+  // Build ZIP manually (stored, no compression — keeps it dependency-free)
+  const zipParts = [];
+  const centralDir = [];
+  let offset = 0;
+
+  const enc = new TextEncoder();
+
+  function crc32(buf) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) {
+      c ^= buf[i];
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function u16(n) { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0,n,true); return b; }
+  function u32(n) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0,n,true); return b; }
+  function concat(...arrays) {
+    const len = arrays.reduce((s,a)=>s+a.length,0);
+    const out = new Uint8Array(len);
+    let p = 0;
+    arrays.forEach(a => { out.set(a,p); p+=a.length; });
+    return out;
+  }
+
+  for (const f of files) {
+    const nameBytes = enc.encode(f.path);
+    const crc       = crc32(f.data);
+    const localHeader = concat(
+      new Uint8Array([0x50,0x4B,0x03,0x04]),  // local file header sig
+      u16(20), u16(0), u16(0),                 // version, flags, compression (stored)
+      u16(0), u16(0),                          // mod time/date
+      u32(crc),
+      u32(f.data.length), u32(f.data.length),  // compressed = uncompressed (stored)
+      u16(nameBytes.length), u16(0),            // filename len, extra len
+      nameBytes,
+      f.data
+    );
+    const cdEntry = concat(
+      new Uint8Array([0x50,0x4B,0x01,0x02]),  // central dir sig
+      u16(20), u16(20), u16(0), u16(0),        // versions, flags, compression
+      u16(0), u16(0),                          // mod time/date
+      u32(crc),
+      u32(f.data.length), u32(f.data.length),
+      u16(nameBytes.length), u16(0), u16(0),   // fn len, extra, comment
+      u16(0), u16(0),                          // disk start, int attr
+      u32(0),                                  // ext attr
+      u32(offset),                             // local header offset
+      nameBytes
+    );
+    zipParts.push(localHeader);
+    centralDir.push(cdEntry);
+    offset += localHeader.length;
+  }
+
+  const cdData    = concat(...centralDir);
+  const cdOffset  = offset;
+  const eocd = concat(
+    new Uint8Array([0x50,0x4B,0x05,0x06]), // end of central dir sig
+    u16(0), u16(0),                        // disk numbers
+    u16(files.length), u16(files.length),  // entry counts
+    u32(cdData.length),                    // central dir size
+    u32(cdOffset),                         // central dir offset
+    u16(0)                                 // comment len
+  );
+
+  const zip = concat(...zipParts, cdData, eocd);
+  const blob = new Blob([zip], { type: 'application/zip' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'nova-assets.zip';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  btn.disabled = false;
+  btn.textContent = '📦 Download as ZIP';
+  showStatus('✅ nova-assets.zip downloaded! Unzip and drop files into your assets/ folder.');
+  setTimeout(hideStatus, 5000);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Build UI
+═══════════════════════════════════════════════════════════════════════════ */
+function buildUI() {
+  const assetMap = {};
+  ALL_ASSETS.forEach(a => assetMap[a.key] = a);
+
+  const groups = [
+    { title: '🐕 Character',        keys: ['nova'] },
+    { title: '🎯 Catchable Items',  keys: ['item-ball','item-duck','item-frisbee','item-butterfly','item-starfish','item-pinecone','item-umbrella','item-egg','item-newspaper','item-snowball','item-coconut','item-fish','item-orb'] },
+    { title: '🎨 UI Assets',        keys: ['biscuit','idli','heart','particle'] },
+    { title: '🌄 Backgrounds (800×450)', keys: ['bg-1','bg-2','bg-3','bg-4','bg-5','bg-6','bg-7','bg-8','bg-9','bg-10'] },
+  ];
+
+  const root = document.getElementById('sections');
+
+  groups.forEach(group => {
+    const title = document.createElement('div');
+    title.className = 'section-title';
+    title.textContent = group.title;
+    root.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    root.appendChild(grid);
+
+    group.keys.forEach(key => {
+      const asset = assetMap[key];
+      const srcCanvas = rendered[key];
+
+      // Display canvas (scaled up for small sprites, scaled down for backgrounds)
+      const displayCanvas = document.createElement('canvas');
+      const isBg = asset.w >= 400;
+      if (isBg) {
+        displayCanvas.width  = 320;
+        displayCanvas.height = 180;
+        displayCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, 320, 180);
+      } else {
+        const scale = Math.max(1, Math.floor(120 / Math.max(asset.w, asset.h)));
+        displayCanvas.width  = asset.w * scale;
+        displayCanvas.height = asset.h * scale;
+        displayCanvas.style.imageRendering = 'pixelated';
+        displayCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+      }
+
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'preview-wrap';
+      wrap.appendChild(displayCanvas);
+      card.appendChild(wrap);
+
+      const keyLbl = document.createElement('div');
+      keyLbl.className = 'key-label';
+      keyLbl.textContent = asset.label || asset.key;
+      card.appendChild(keyLbl);
+
+      const dimLbl = document.createElement('div');
+      dimLbl.className = 'dim-label';
+      dimLbl.textContent = `${asset.w} × ${asset.h} px`;
+      card.appendChild(dimLbl);
+
+      const pathLbl = document.createElement('div');
+      pathLbl.className = 'path-label';
+      pathLbl.textContent = asset.file;
+      card.appendChild(pathLbl);
+
+      const btn = document.createElement('button');
+      btn.className = 'save-btn';
+      btn.textContent = '⬇ Save PNG';
+      btn.addEventListener('click', () => downloadCanvas(srcCanvas, asset.file));
+      card.appendChild(btn);
+
+      grid.appendChild(card);
+    });
+  });
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+renderAll();
+buildUI();
+document.getElementById('dlAll').addEventListener('click', downloadAll);
+document.getElementById('dlZip').addEventListener('click', downloadZip);
+</script>
+</body>
+</html>

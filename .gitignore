@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+.vscode/
+
+# OMC / Claude Code internal
+.omc/
+.claude/
+
+# Logs
+*.log
