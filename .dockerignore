@@ -1,0 +1,21 @@
+# Version control
+.git
+.gitignore
+
+# macOS & IDE clutter
+.DS_Store
+.idea/
+.vscode/
+
+# OMC / Claude Code internals (never bake into the image)
+.omc/
+.claude/
+
+# Runtime data (mounted as a volume, not baked in)
+data/
+
+# Server node_modules are installed fresh inside the image
+server/node_modules/
+
+# Logs
+*.log

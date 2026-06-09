@@ -13,3 +13,9 @@
 
 # Logs
 *.log
+
+# SQLite database (lives in a Docker volume, never committed)
+data/
+
+# Server dependencies (installed inside the Docker image)
+server/node_modules/
