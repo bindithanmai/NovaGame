@@ -19,3 +19,6 @@ server/node_modules/
 
 # Logs
 *.log
+
+# README (not served by the game)
+README.md

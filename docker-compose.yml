@@ -1,38 +1,71 @@
 version: '3.8'
 
-# Nova's Catch Adventure — local stack
-# Run alongside other apps on the same Pi with a shared traefik/nginx proxy,
-# or standalone with the port published directly.
+# Nova's Catch Adventure — nginx + Express/SQLite stack
 #
-# Quick start:
+# Quick start (Raspberry Pi or any Linux host):
 #   docker compose up -d
-#   open http://<pi-ip>:3000
+#   open http://<host-ip>
 #
-# Change the host port by editing the left side of the ports mapping,
-# or set PORT_HOST=8080 in a .env file next to this file.
+# Custom port:  PORT_HOST=8080 docker compose up -d
+#               (or add PORT_HOST=8080 in a .env file here)
+#
+# Services:
+#   nova-web  — nginx, serves static files, public on PORT_HOST (default 80)
+#   nova-api  — Express + SQLite, internal only (not exposed to host)
+#
+# To run alongside other apps sharing port 80, set server_name in nginx.conf
+# and either use a shared nginx/Traefik instance or map PORT_HOST to a
+# different port and reverse-proxy to it.
 
 services:
-  nova-game:
-    build: .
-    image: nova-game:latest
-    container_name: nova-game
+
+  # ── Static file server ──────────────────────────────────────────────────────
+  nova-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    image: nova-web:latest
+    container_name: nova-web
     restart: unless-stopped
-
     ports:
-      - "${PORT_HOST:-3000}:3000"
+      - "${PORT_HOST:-80}:80"
+    depends_on:
+      nova-api:
+        condition: service_healthy
+    networks:
+      - nova-net
+    mem_limit: 64m
+    memswap_limit: 64m
 
+    # ── Optional: shared external proxy network (Traefik / nginx-proxy) ──────
+    # networks:
+    #   - nova-net
+    #   - proxy
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.nova.rule=Host(`nova.home`)"
+    #   - "traefik.http.services.nova.loadbalancer.server.port=80"
+
+  # ── API + database ──────────────────────────────────────────────────────────
+  nova-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nova-api:latest
+    container_name: nova-api
+    restart: unless-stopped
+    # Not exposed to the host — only nova-web can reach it via nova-net
+    expose:
+      - "3000"
     volumes:
-      # SQLite database persisted on the host — survives container rebuilds
       - nova-scores:/app/data
-
     environment:
       PORT: "3000"
       DB_PATH: "/app/data/scores.db"
-
-    # Keeps memory footprint small on the Pi
+    networks:
+      - nova-net
     mem_limit: 128m
     memswap_limit: 128m
-
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
       interval: 30s
@@ -40,20 +73,13 @@ services:
       retries: 3
       start_period: 15s
 
-    # ── Optional: attach to a shared reverse-proxy network ──────────────────
-    # Uncomment these lines if you run Traefik or nginx-proxy on the Pi so
-    # other apps can share port 80/443 with path-based or host-based routing.
-    #
-    # networks:
-    #   - proxy
-    # labels:
-    #   - "traefik.enable=true"
-    #   - "traefik.http.routers.nova.rule=Host(`nova.home`)"
-    #   - "traefik.http.services.nova.loadbalancer.server.port=3000"
-
 volumes:
   nova-scores:
     driver: local
+
+networks:
+  nova-net:
+    driver: bridge
 
 # networks:
 #   proxy:

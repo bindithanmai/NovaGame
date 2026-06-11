@@ -1,0 +1,20 @@
+# Lean nginx image — serves Nova's static game files only.
+# The Express API runs in a separate container (see docker-compose.yml).
+FROM nginx:1.27-alpine
+
+# Drop the default config so ours is the only one loaded
+RUN rm /etc/nginx/conf.d/default.conf
+
+COPY nginx.conf /etc/nginx/conf.d/nova.conf
+
+# Copy only the files the browser needs — no server code, no data dir
+COPY index.html style.css /usr/share/nginx/html/
+COPY src/    /usr/share/nginx/html/src/
+COPY assets/ /usr/share/nginx/html/assets/
+COPY scripts/ /usr/share/nginx/html/scripts/
+
+EXPOSE 80
+
+# nginx:alpine ships without wget; use the built-in pid-check instead
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD nginx -t 2>/dev/null || exit 1
